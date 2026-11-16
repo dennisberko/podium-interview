@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "**/*.md",
+    "**/.agents/**",
+    "**/.codex/**",
+    "package-lock.json",
+    "packages/server/src/borrowers.json"
+  ],
+  "useTabs": false,
+  "singleQuote": false,
+  "jsxSingleQuote": false,
+  "sortPackageJson": false,
+  "printWidth": 80,
+  "trailingComma": "all"
+}
