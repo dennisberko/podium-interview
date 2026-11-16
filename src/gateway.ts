@@ -5,6 +5,8 @@
 
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
+import type { Clock } from "./clock.ts";
+import { systemClock } from "./clock.ts";
 import type { GatewayConfig, RouteConfig } from "./config.ts";
 import { createHealthHandler, HEALTH_PATH } from "./health.ts";
 import { sendError } from "./http.ts";
@@ -37,7 +39,12 @@ function parseTarget(req: IncomingMessage): RequestTarget | undefined {
 function createContext(
   req: IncomingMessage,
   res: ServerResponse,
-  { route, path, search }: { route: RouteConfig; path: string; search: string },
+  {
+    route,
+    path,
+    search,
+    clientIp,
+  }: { route: RouteConfig; path: string; search: string; clientIp: string },
 ): RequestContext {
   const controller = new AbortController();
   // `close` before the response finished means the client went away.
@@ -48,7 +55,7 @@ function createContext(
   });
   return {
     route,
-    clientIp: req.socket.remoteAddress ?? "",
+    clientIp,
     receivedAt: new Date(),
     signal: controller.signal,
     request: {
@@ -61,8 +68,27 @@ function createContext(
   };
 }
 
-export function createGateway(config: GatewayConfig): Server {
-  const health = createHealthHandler();
+/** Seams for tests; production uses the defaults. */
+export interface GatewayOptions {
+  /** Defaults to `performance.now()`. */
+  clock?: Clock;
+  /**
+   * Becomes `ctx.clientIp`, the key for per-IP features such as rate limiting.
+   * Defaults to the socket's remote address.
+   */
+  clientIp?: (req: IncomingMessage) => string;
+}
+
+function socketClientIp(req: IncomingMessage): string {
+  return req.socket.remoteAddress ?? "";
+}
+
+export function createGateway(
+  config: GatewayConfig,
+  options: GatewayOptions = {},
+): Server {
+  const health = createHealthHandler(options.clock ?? systemClock);
+  const clientIpOf = options.clientIp ?? socketClientIp;
   const router = createRouter(config.routes);
   const pipelines = new Map<RouteConfig, Handler>(
     config.routes.map((route) => [route, buildRouteHandler(route)]),
@@ -96,6 +122,7 @@ export function createGateway(config: GatewayConfig): Server {
           route,
           path: upstreamPath,
           search,
+          clientIp: clientIpOf(req),
         });
         await respond(res, async () => pipeline(ctx));
         return;

@@ -2,16 +2,16 @@
 // so no config (not even a route at "/health") can shadow or break it.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Clock } from "./clock.ts";
 import { sendError, sendJson } from "./http.ts";
 
 export const HEALTH_PATH = "/health";
 
 export type HealthHandler = (req: IncomingMessage, res: ServerResponse) => void;
 
-/** `startedAt` is a `performance.now()` timestamp (monotonic, unaffected by clock changes). */
-export function createHealthHandler(
-  startedAt = performance.now(),
-): HealthHandler {
+/** Uptime is measured from when the handler is created. */
+export function createHealthHandler(clock: Clock): HealthHandler {
+  const startedAt = clock.now();
   return (req, res) => {
     if (req.method !== "GET") {
       sendError(res, {
@@ -25,7 +25,7 @@ export function createHealthHandler(
       status: 200,
       body: {
         status: "healthy",
-        uptime_seconds: Math.floor((performance.now() - startedAt) / 1000),
+        uptime_seconds: Math.floor((clock.now() - startedAt) / 1000),
       },
       headers: { "cache-control": "no-store" },
     });
