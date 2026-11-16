@@ -1,1 +1,3 @@
-- Load config on startup, sacrifice hot reloading for less implementation complexity
+- Load config on startup, sacrifice hot reloading for less implementation complexity- Listen port comes from `gateway.port` (8080 in the example) so a different config can move it
+- Use port from yaml file rather than the core requirement of "listening on port 8080", I'm assuming that means read from config as the provided one is 8080
+- Use node http server since we'll get limited benefits from something like express/hono

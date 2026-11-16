@@ -301,5 +301,12 @@ export function parseConfig(
 
 /** Read and load the config file. Call once at startup, before listening. */
 export function loadConfig(path = DEFAULT_CONFIG_PATH): GatewayConfig {
-  return parseConfig(readFileSync(path, "utf8"), path);
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new ConfigError([`cannot read ${path}: ${reason}`]);
+  }
+  return parseConfig(text, path);
 }

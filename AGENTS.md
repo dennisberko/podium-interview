@@ -1,3 +1,4 @@
 - Do not add or update unit tests unless the user explicitly asks for unit-test work
 - After code changes, run `npm run check`.
 - Do all work on `main` branch, never switch branches.
+- Do not touch DECISIONS.md without the user asking
