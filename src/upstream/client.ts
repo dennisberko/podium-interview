@@ -125,6 +125,9 @@ export async function callUpstream({
 
     upstreamReq.on("error", (err) => {
       clearTimeout(deadline);
+      // The signal can outlive this call (health checks share one across
+      // every probe), so a failed call must not leave its listener behind.
+      signal.removeEventListener("abort", onAbort);
       const error =
         err instanceof UpstreamError
           ? err

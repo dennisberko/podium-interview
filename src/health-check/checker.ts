@@ -50,10 +50,14 @@ export function createHealthChecker(
   }
   const { interval, unhealthy_threshold: threshold } = config;
   const timeoutMs = Math.min(route.timeout_ms, interval);
+  // `path` may carry a query ("/healthz?full=1"); split it so the "?" isn't
+  // percent-encoded into the path. Prefixing a dummy origin (rather than
+  // passing it as a base) keeps "//x" a path, as in gateway.ts.
+  const { pathname, search } = new URL(`http://probe.invalid${config.path}`);
   const probe: UpstreamRequest = {
     method: "GET",
-    path: config.path,
-    search: "",
+    path: pathname,
+    search,
     headers: {},
     body: { kind: "buffered", data: Buffer.alloc(0) },
   };
