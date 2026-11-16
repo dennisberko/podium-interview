@@ -12,13 +12,22 @@
 //     -> retry -> circuit breaker -> [upstream call]
 
 import type { RouteConfig } from "../config.ts";
+import { createRateLimitStage } from "../rate-limit/stage.ts";
 import { callUpstream } from "../upstream/client.ts";
 import { compose } from "./compose.ts";
-import type { Handler, Middleware, UpstreamRequest } from "./context.ts";
+import type {
+  Handler,
+  Middleware,
+  StageDeps,
+  UpstreamRequest,
+} from "./context.ts";
 
-type StageFactory = (route: RouteConfig) => Middleware | undefined;
+type StageFactory = (
+  route: RouteConfig,
+  deps: StageDeps,
+) => Middleware | undefined;
 
-const STAGES: readonly StageFactory[] = [];
+const STAGES: readonly StageFactory[] = [createRateLimitStage];
 
 /** Upstream URL = target base URL (+ any base path) + request path + query. */
 function upstreamUrl(base: URL, { path, search }: UpstreamRequest): URL {
@@ -45,8 +54,11 @@ function createUpstreamHandler(route: RouteConfig): Handler {
     });
 }
 
-export function buildRouteHandler(route: RouteConfig): Handler {
-  const stages = STAGES.map((create) => create(route)).filter(
+export function buildRouteHandler(
+  route: RouteConfig,
+  deps: StageDeps,
+): Handler {
+  const stages = STAGES.map((create) => create(route, deps)).filter(
     (stage) => stage !== undefined,
   );
   return compose(stages, createUpstreamHandler(route));

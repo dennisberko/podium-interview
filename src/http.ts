@@ -1,7 +1,9 @@
 // Small response helpers shared by every handler, so all gateway-generated
-// responses (health, errors) have the same shape and headers.
+// responses (health, errors, rejections from pipeline stages) have the same
+// shape and headers.
 
-import type { ServerResponse } from "node:http";
+import type { OutgoingHttpHeaders, ServerResponse } from "node:http";
+import type { GatewayResponse } from "./pipeline/context.ts";
 
 export type JsonValue =
   | string
@@ -21,31 +23,46 @@ interface JsonResponse {
   headers?: Record<string, string>;
 }
 
-export function sendJson(
-  res: ServerResponse,
-  { status, body, headers = {} }: JsonResponse,
-): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    ...headers,
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
+/** Gateway-generated error, e.g. `{ "error": "not_found" }`. */
+interface ErrorResponse extends Pick<JsonResponse, "status" | "headers"> {
+  error: string;
 }
 
-/** Gateway-generated error, e.g. `{ "error": "not_found" }`. */
-export function sendError(
-  res: ServerResponse,
-  {
+interface Encoded {
+  status: number;
+  headers: OutgoingHttpHeaders;
+  data: Buffer;
+}
+
+function encodeJson({ status, body, headers = {} }: JsonResponse): Encoded {
+  const data = Buffer.from(JSON.stringify(body));
+  return {
     status,
-    error,
-    headers,
-  }: { status: number; error: string } & Pick<JsonResponse, "headers">,
-): void {
-  sendJson(res, {
-    status,
-    body: { error },
-    ...(headers ? { headers } : {}),
-  });
+    headers: {
+      ...headers,
+      "content-type": "application/json; charset=utf-8",
+      "content-length": data.length,
+    },
+    data,
+  };
+}
+
+function errorBody({ status, error, headers }: ErrorResponse): JsonResponse {
+  return { status, body: { error }, ...(headers ? { headers } : {}) };
+}
+
+export function sendJson(res: ServerResponse, response: JsonResponse): void {
+  const { status, headers, data } = encodeJson(response);
+  res.writeHead(status, headers);
+  res.end(data);
+}
+
+export function sendError(res: ServerResponse, response: ErrorResponse): void {
+  sendJson(res, errorBody(response));
+}
+
+/** A gateway-generated error as a pipeline result, for stages that reject a request. */
+export function errorResponse(response: ErrorResponse): GatewayResponse {
+  const { status, headers, data } = encodeJson(errorBody(response));
+  return { status, headers, body: { kind: "buffered", data } };
 }

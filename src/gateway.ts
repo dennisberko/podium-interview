@@ -70,7 +70,7 @@ function createContext(
 
 /** Seams for tests; production uses the defaults. */
 export interface GatewayOptions {
-  /** Defaults to `performance.now()`. */
+  /** Drives /health uptime and rate limit windows. Defaults to `performance.now()`. */
   clock?: Clock;
   /**
    * Becomes `ctx.clientIp`, the key for per-IP features such as rate limiting.
@@ -87,11 +87,12 @@ export function createGateway(
   config: GatewayConfig,
   options: GatewayOptions = {},
 ): Server {
-  const health = createHealthHandler(options.clock ?? systemClock);
+  const clock = options.clock ?? systemClock;
+  const health = createHealthHandler(clock);
   const clientIpOf = options.clientIp ?? socketClientIp;
   const router = createRouter(config.routes);
   const pipelines = new Map<RouteConfig, Handler>(
-    config.routes.map((route) => [route, buildRouteHandler(route)]),
+    config.routes.map((route) => [route, buildRouteHandler(route, { clock })]),
   );
 
   async function dispatch(

@@ -8,6 +8,7 @@
 
 import type { OutgoingHttpHeaders } from "node:http";
 import type { Readable } from "node:stream";
+import type { Clock } from "../clock.ts";
 import type { RouteConfig } from "../config.ts";
 
 /**
@@ -48,6 +49,12 @@ export interface GatewayResponse {
 }
 
 export type Handler = (ctx: RequestContext) => Promise<GatewayResponse>;
+
+/** Shared services a stage factory may use when it builds a route's stage. */
+export interface StageDeps {
+  /** Time source for windows, cooldowns and backoff. */
+  clock: Clock;
+}
 
 export type Middleware = (
   ctx: RequestContext,
