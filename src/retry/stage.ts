@@ -139,8 +139,9 @@ export function createRetryStage(
       signal: ctx.signal,
     });
     if (buffered.kind === "too_large") {
-      // Node discards the unread rest of the upload after responding, so the
-      // client can finish sending and read the 413 instead of being reset.
+      // bufferBody has drained the rest of the upload (within its allowance),
+      // so the client can finish sending and read the 413 instead of being
+      // reset.
       return errorResponse({ status: 413, error: "payload_too_large" });
     }
     // Inner stages may rewrite ctx.request; every try starts from this copy.
