@@ -1,46 +1,131 @@
-// The gateway's HTTP server. Builds per-instance state (uptime clock, later
-// rate limiters / breakers / balancers) from a resolved config and dispatches
-// each request: built-in endpoints first, then configured routes.
+// The gateway's HTTP server. At startup it builds the router and one pipeline
+// per route (see pipeline/build.ts). Per request:
+//
+//   parse target -> /health -> route lookup (404 / 405) -> route pipeline -> respond
 
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import type { GatewayConfig } from "./config.ts";
+import type { GatewayConfig, RouteConfig } from "./config.ts";
 import { createHealthHandler, HEALTH_PATH } from "./health.ts";
 import { sendError } from "./http.ts";
+import { buildRouteHandler } from "./pipeline/build.ts";
+import type { Handler, RequestContext } from "./pipeline/context.ts";
+import { respond, sendFailure } from "./pipeline/respond.ts";
+import type { RouteLookup } from "./router.ts";
+import { createRouter } from "./router.ts";
+import { UnreachableCaseError } from "./unreachable.ts";
+import { forwardedRequestHeaders } from "./upstream/forward-headers.ts";
 
-/** Path portion of the request target, or `undefined` if it can't be parsed. */
-function requestPath(req: IncomingMessage): string | undefined {
-  // Base is only used to parse origin-form targets ("/a?b"); host is irrelevant.
-  return URL.parse(req.url ?? "", "http://gateway.invalid")?.pathname;
+interface RequestTarget {
+  /** Normalized path ("/a/../b" -> "/b"), still percent-encoded. */
+  path: string;
+  /** Query string including the leading "?", or "". */
+  search: string;
 }
 
-export function createGateway(_config: GatewayConfig): Server {
-  const health = createHealthHandler();
+/** Parse the request target, or `undefined` if it isn't a valid URL. */
+function parseTarget(req: IncomingMessage): RequestTarget | undefined {
+  const raw = req.url ?? "";
+  // Origin-form ("/a?b") is resolved against a dummy origin; prefixing instead of
+  // passing it as a base keeps "//x" a path rather than a protocol-relative URL.
+  const url = URL.parse(
+    raw.startsWith("/") ? `http://gateway.invalid${raw}` : raw,
+  );
+  return url ? { path: url.pathname, search: url.search } : undefined;
+}
 
-  function handle(req: IncomingMessage, res: ServerResponse): void {
-    const path = requestPath(req);
-    if (path === undefined) {
+function createContext(
+  req: IncomingMessage,
+  res: ServerResponse,
+  { route, path, search }: { route: RouteConfig; path: string; search: string },
+): RequestContext {
+  const controller = new AbortController();
+  // `close` before the response finished means the client went away.
+  res.once("close", () => {
+    if (!res.writableFinished) {
+      controller.abort();
+    }
+  });
+  return {
+    route,
+    clientIp: req.socket.remoteAddress ?? "",
+    receivedAt: new Date(),
+    signal: controller.signal,
+    request: {
+      method: req.method ?? "GET",
+      path,
+      search,
+      headers: forwardedRequestHeaders(req),
+      body: { kind: "stream", stream: req },
+    },
+  };
+}
+
+export function createGateway(config: GatewayConfig): Server {
+  const health = createHealthHandler();
+  const router = createRouter(config.routes);
+  const pipelines = new Map<RouteConfig, Handler>(
+    config.routes.map((route) => [route, buildRouteHandler(route)]),
+  );
+
+  async function dispatch(
+    req: IncomingMessage,
+    res: ServerResponse,
+    { lookup, search }: { lookup: RouteLookup; search: string },
+  ): Promise<void> {
+    switch (lookup.kind) {
+      case "not_found": {
+        sendError(res, { status: 404, error: "not_found" });
+        return;
+      }
+      case "method_not_allowed": {
+        sendError(res, {
+          status: 405,
+          error: "method_not_allowed",
+          headers: { allow: lookup.allow.join(", ") },
+        });
+        return;
+      }
+      case "matched": {
+        const { route, upstreamPath } = lookup;
+        const pipeline = pipelines.get(route);
+        if (!pipeline) {
+          throw new Error(`no pipeline built for route ${route.path}`);
+        }
+        const ctx = createContext(req, res, {
+          route,
+          path: upstreamPath,
+          search,
+        });
+        await respond(res, async () => pipeline(ctx));
+        return;
+      }
+      default: {
+        throw new UnreachableCaseError(lookup);
+      }
+    }
+  }
+
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    const target = parseTarget(req);
+    if (!target) {
       sendError(res, { status: 400, error: "bad_request" });
       return;
     }
-    if (path === HEALTH_PATH) {
+    if (target.path === HEALTH_PATH) {
       health(req, res);
       return;
     }
-    // Route matching and proxying come next
-    sendError(res, { status: 404, error: "not_found" });
+    await dispatch(req, res, {
+      lookup: router(target.path, req.method ?? ""),
+      search: target.search,
+    });
   }
 
   return createServer((req, res) => {
-    try {
-      handle(req, res);
-    } catch (err) {
-      console.error("unhandled error while handling request", err);
-      if (res.headersSent) {
-        res.destroy();
-      } else {
-        sendError(res, { status: 500, error: "internal_error" });
-      }
-    }
+    handle(req, res).catch((err: unknown) => sendFailure(res, err));
   });
 }

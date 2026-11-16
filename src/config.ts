@@ -135,7 +135,11 @@ const CircuitBreaker = z.strictObject({
 });
 
 const Route = z.strictObject({
-  path: z.string().startsWith("/"),
+  // "/api/users/" and "/api/users" are the same route; "/" stays "/".
+  path: z
+    .string()
+    .startsWith("/")
+    .transform((path) => path.replace(/\/+$/, "") || "/"),
   methods: z
     .array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]))
     .min(1),
@@ -172,18 +176,43 @@ export const ConfigSchema = z
     routes: z.array(Route),
   })
   .superRefine((config, ctx) => {
-    const seen = new Set<string>();
-    config.routes.forEach((route, i) => {
-      if (seen.has(route.path)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["routes", i, "path"],
-          message: `duplicate route path ${JSON.stringify(route.path)}`,
-        });
-      }
-      seen.add(route.path);
-    });
+    for (const { index, message } of overlappingRoutes(config.routes)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["routes", index, "path"],
+        message,
+      });
+    }
   });
+
+/**
+ * Several routes may share a path if their methods don't overlap
+ * (GET /x -> A, POST /x -> B). Two routes claiming the same path + method
+ * would make routing ambiguous, so that's a config error.
+ */
+function overlappingRoutes(
+  routes: readonly { path: string; methods: readonly string[] }[],
+): { index: number; message: string }[] {
+  const owners = new Map<string, number>();
+  const problems: { index: number; message: string }[] = [];
+  routes.forEach(({ path, methods }, index) => {
+    const clashes = methods.filter((method) => owners.has(`${method} ${path}`));
+    const [first] = clashes;
+    if (first !== undefined) {
+      const owner = owners.get(`${first} ${path}`) ?? 0;
+      problems.push({
+        index,
+        message: `duplicate route path ${JSON.stringify(path)} for ${clashes.join(", ")} (already handled by routes.${owner})`,
+      });
+    }
+    for (const method of methods) {
+      if (!owners.has(`${method} ${path}`)) {
+        owners.set(`${method} ${path}`, index);
+      }
+    }
+  });
+  return problems;
+}
 
 export type ParsedConfig = z.output<typeof ConfigSchema>;
 type ParsedRoute = ParsedConfig["routes"][number];
