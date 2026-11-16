@@ -1,0 +1,4 @@
+interface:
+  display_name: "Writing TypeScript"
+  short_description: "Apply JA Painting TypeScript code rules"
+  default_prompt: "Use $writing-typescript to write or revise TypeScript code for this repository."

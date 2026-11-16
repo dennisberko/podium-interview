@@ -1,0 +1,2 @@
+- Do not add or update unit tests unless the user explicitly asks for unit-test work
+- After code changes, run `npm run check`.
