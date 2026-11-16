@@ -224,7 +224,12 @@
     "promise/valid-params": "error",
     "promise/prefer-await-to-then": "off",
     "unicorn/catch-error-name": "off",
-    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
+    "unicorn/filename-case": [
+      "error",
+      {
+        "case": "kebabCase"
+      }
+    ],
     "unicorn/no-array-callback-reference": "off",
     "unicorn/no-array-reduce": "off",
     "unicorn/no-null": "off",
@@ -384,6 +389,12 @@
       "rules": {
         "react/no-multi-comp": "off",
         "react/jsx-props-no-spreading": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.ts"],
+      "rules": {
+        "@typescript-eslint/no-floating-promises": "off"
       }
     }
   ]

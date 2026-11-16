@@ -4,7 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "oxlint --type-aware",
+    "typecheck": "tsc",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run format:check && npm run typecheck && npm run lint"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
