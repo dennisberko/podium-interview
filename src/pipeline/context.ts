@@ -8,7 +8,7 @@
 
 import type { OutgoingHttpHeaders } from "node:http";
 import type { Readable } from "node:stream";
-import type { Clock } from "../clock.ts";
+import type { Clock, Sleep } from "../clock.ts";
 import type { RouteConfig } from "../config.ts";
 
 /**
@@ -42,6 +42,11 @@ export interface RequestContext {
 }
 
 export interface GatewayResponse {
+  /**
+   * Who produced it: the upstream, or the gateway itself (a stage rejecting the
+   * request). Retry only ever retries upstream responses.
+   */
+  source: "upstream" | "gateway";
   status: number;
   statusMessage?: string | undefined;
   headers: OutgoingHttpHeaders;
@@ -54,6 +59,8 @@ export type Handler = (ctx: RequestContext) => Promise<GatewayResponse>;
 export interface StageDeps {
   /** Time source for windows, cooldowns and backoff. */
   clock: Clock;
+  /** Waits between retry attempts. */
+  sleep: Sleep;
 }
 
 export type Middleware = (

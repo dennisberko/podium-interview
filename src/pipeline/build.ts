@@ -14,6 +14,7 @@
 import { createAuthStage } from "../auth/stage.ts";
 import type { RouteConfig } from "../config.ts";
 import { createRateLimitStage } from "../rate-limit/stage.ts";
+import { createRetryStage } from "../retry/stage.ts";
 import { callUpstream } from "../upstream/client.ts";
 import { compose } from "./compose.ts";
 import type {
@@ -28,7 +29,12 @@ type StageFactory = (
   deps: StageDeps,
 ) => Middleware | undefined;
 
-const STAGES: readonly StageFactory[] = [createAuthStage, createRateLimitStage];
+// Transforms are not built yet; they will go between rate limit and retry.
+const STAGES: readonly StageFactory[] = [
+  createAuthStage,
+  createRateLimitStage,
+  createRetryStage,
+];
 
 /** Upstream URL = target base URL (+ any base path) + request path + query. */
 function upstreamUrl(base: URL, { path, search }: UpstreamRequest): URL {

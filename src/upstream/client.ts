@@ -66,6 +66,14 @@ function outgoingHeaders(
   if (body.kind === "stream") {
     return { ...headers, host: url.host };
   }
+  // A request that arrived without a body stays without one.
+  if (
+    body.data.length === 0 &&
+    headers["content-length"] === undefined &&
+    headers["transfer-encoding"] === undefined
+  ) {
+    return { ...headers, host: url.host };
+  }
   // A buffered body has a known length; don't claim it's chunked.
   const { "transfer-encoding": _chunked, ...rest } = headers;
   return { ...rest, host: url.host, "content-length": body.data.length };
@@ -142,6 +150,7 @@ export async function callUpstream({
         signal.removeEventListener("abort", onAbort);
       });
       resolve({
+        source: "upstream",
         status: upstreamRes.statusCode ?? 502,
         statusMessage: upstreamRes.statusMessage,
         headers: withoutHopByHop(upstreamRes.headers),

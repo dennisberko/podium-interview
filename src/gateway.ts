@@ -5,8 +5,8 @@
 
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import type { Clock } from "./clock.ts";
-import { systemClock } from "./clock.ts";
+import type { Clock, Sleep } from "./clock.ts";
+import { systemClock, systemSleep } from "./clock.ts";
 import type { GatewayConfig, RouteConfig } from "./config.ts";
 import { createHealthHandler, HEALTH_PATH } from "./health.ts";
 import { sendError } from "./http.ts";
@@ -72,6 +72,8 @@ function createContext(
 export interface GatewayOptions {
   /** Drives /health uptime and rate limit windows. Defaults to `performance.now()`. */
   clock?: Clock;
+  /** Waits between retry attempts. Defaults to a real timer. */
+  sleep?: Sleep;
   /**
    * Becomes `ctx.clientIp`, the key for per-IP features such as rate limiting.
    * Defaults to the socket's remote address.
@@ -88,11 +90,15 @@ export function createGateway(
   options: GatewayOptions = {},
 ): Server {
   const clock = options.clock ?? systemClock;
+  const sleep = options.sleep ?? systemSleep;
   const health = createHealthHandler(clock);
   const clientIpOf = options.clientIp ?? socketClientIp;
   const router = createRouter(config.routes);
   const pipelines = new Map<RouteConfig, Handler>(
-    config.routes.map((route) => [route, buildRouteHandler(route, { clock })]),
+    config.routes.map((route) => [
+      route,
+      buildRouteHandler(route, { clock, sleep }),
+    ]),
   );
 
   async function dispatch(

@@ -64,5 +64,10 @@ export function sendError(res: ServerResponse, response: ErrorResponse): void {
 /** A gateway-generated error as a pipeline result, for stages that reject a request. */
 export function errorResponse(response: ErrorResponse): GatewayResponse {
   const { status, headers, data } = encodeJson(errorBody(response));
-  return { status, headers, body: { kind: "buffered", data } };
+  return {
+    source: "gateway",
+    status,
+    headers,
+    body: { kind: "buffered", data },
+  };
 }
