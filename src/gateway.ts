@@ -1,13 +1,16 @@
-// The gateway's HTTP server. At startup it builds the router and one pipeline
-// per route (see pipeline/build.ts). Per request:
+// The gateway's HTTP server. At startup it builds the router, one pipeline
+// per route (see pipeline/build.ts) and one upstream health checker per route.
+// Health checks run while the server is listening. Per request:
 //
 //   parse target -> /health -> route lookup (404 / 405) -> route pipeline -> respond
 
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
-import type { Clock, Sleep } from "./clock.ts";
-import { systemClock, systemSleep } from "./clock.ts";
+import type { Clock, Every, Sleep } from "./clock.ts";
+import { systemClock, systemEvery, systemSleep } from "./clock.ts";
 import type { GatewayConfig, RouteConfig } from "./config.ts";
+import type { HealthChecker } from "./health-check/checker.ts";
+import { createHealthChecker } from "./health-check/checker.ts";
 import { createHealthHandler, HEALTH_PATH } from "./health.ts";
 import { sendError } from "./http.ts";
 import { buildRouteHandler } from "./pipeline/build.ts";
@@ -74,6 +77,8 @@ export interface GatewayOptions {
   clock?: Clock;
   /** Waits between retry attempts. Defaults to a real timer. */
   sleep?: Sleep;
+  /** Schedules upstream health-check rounds. Defaults to real timers. */
+  every?: Every;
   /**
    * Becomes `ctx.clientIp`, the key for per-IP features such as rate limiting.
    * Defaults to the socket's remote address.
@@ -94,11 +99,14 @@ export function createGateway(
   const health = createHealthHandler(clock);
   const clientIpOf = options.clientIp ?? socketClientIp;
   const router = createRouter(config.routes);
+  const every = options.every ?? systemEvery;
+  const checkers: HealthChecker[] = [];
   const pipelines = new Map<RouteConfig, Handler>(
-    config.routes.map((route) => [
-      route,
-      buildRouteHandler(route, { clock, sleep }),
-    ]),
+    config.routes.map((route) => {
+      const checker = createHealthChecker(route, every);
+      checkers.push(checker);
+      return [route, buildRouteHandler(route, { clock, sleep }, checker)];
+    }),
   );
 
   async function dispatch(
@@ -159,7 +167,18 @@ export function createGateway(
     });
   }
 
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => sendFailure(res, err));
   });
+  server.on("listening", () => {
+    for (const checker of checkers) {
+      checker.start();
+    }
+  });
+  server.on("close", () => {
+    for (const checker of checkers) {
+      checker.stop();
+    }
+  });
+  return server;
 }

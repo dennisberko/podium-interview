@@ -89,18 +89,35 @@ const SingleUpstream = z
     timeout,
   }));
 
-const BalancedUpstream = z.strictObject({
-  targets: z
-    .array(
-      z.strictObject({
-        url: HttpUrl,
-        weight: z.number().int().positive().default(1),
-      }),
-    )
-    .min(1),
-  balance: z.enum(["round_robin", "weighted_round_robin"]),
-  timeout: Duration.optional(),
-});
+// Weights only mean something for `weighted_round_robin`; a weight under
+// `round_robin` would silently do nothing, so it is rejected instead.
+const BalancedUpstream = z
+  .strictObject({
+    targets: z
+      .array(
+        z.strictObject({
+          url: HttpUrl,
+          weight: z.number().int().positive().default(1),
+        }),
+      )
+      .min(1),
+    balance: z.enum(["round_robin", "weighted_round_robin"]),
+    timeout: Duration.optional(),
+  })
+  .superRefine(({ targets, balance }, ctx) => {
+    if (balance !== "round_robin") {
+      return;
+    }
+    targets.forEach(({ weight }, index) => {
+      if (weight !== 1) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["targets", index, "weight"],
+          message: `weight ${weight} has no effect with balance "round_robin"; use "weighted_round_robin" or remove it`,
+        });
+      }
+    });
+  });
 
 const Upstream = z.union([SingleUpstream, BalancedUpstream]);
 

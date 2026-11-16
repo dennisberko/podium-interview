@@ -10,19 +10,21 @@
 // Planned order, outermost first:
 //   auth -> rate limit -> response transform -> request transform
 //     -> retry -> circuit breaker -> [upstream call]
+//
+// The upstream call picks a target per try (see load-balancing/balancer.ts),
+// so a retried request moves on to the next healthy target.
 
 import { createAuthStage } from "../auth/stage.ts";
 import type { RouteConfig } from "../config.ts";
+import { errorResponse } from "../http.ts";
+import type { TargetHealth } from "../load-balancing/balancer.ts";
+import { createBalancer } from "../load-balancing/balancer.ts";
 import { createRateLimitStage } from "../rate-limit/stage.ts";
 import { createRetryStage } from "../retry/stage.ts";
 import { callUpstream } from "../upstream/client.ts";
+import { upstreamUrl } from "../upstream/url.ts";
 import { compose } from "./compose.ts";
-import type {
-  Handler,
-  Middleware,
-  StageDeps,
-  UpstreamRequest,
-} from "./context.ts";
+import type { Handler, Middleware, StageDeps } from "./context.ts";
 
 type StageFactory = (
   route: RouteConfig,
@@ -36,37 +38,39 @@ const STAGES: readonly StageFactory[] = [
   createRetryStage,
 ];
 
-/** Upstream URL = target base URL (+ any base path) + request path + query. */
-function upstreamUrl(base: URL, { path, search }: UpstreamRequest): URL {
-  const url = new URL(base);
-  url.pathname = base.pathname.replace(/\/+$/, "") + path;
-  url.search = search;
-  return url;
-}
-
-/** The innermost stage: send the request to the route's upstream. */
-function createUpstreamHandler(route: RouteConfig): Handler {
-  // Load balancing replaces this: for now every route uses its first target.
-  const [target] = route.upstream.targets;
-  if (!target) {
-    throw new Error(`route ${route.path} has no upstream targets`);
-  }
-  const base = new URL(target.url);
-  return async (ctx) =>
-    callUpstream({
+/**
+ * The innermost stage: send the request to the next healthy target. With no
+ * healthy target left it answers 503 { "error": "no_healthy_upstream" } itself,
+ * which retry never retries.
+ */
+function createUpstreamHandler(
+  route: RouteConfig,
+  health: TargetHealth,
+): Handler {
+  const bases = route.upstream.targets.map(({ url }) => new URL(url));
+  const pick = createBalancer(route.upstream, health);
+  return async (ctx) => {
+    const index = pick();
+    const base = index === undefined ? undefined : bases[index];
+    if (!base) {
+      return errorResponse({ status: 503, error: "no_healthy_upstream" });
+    }
+    return callUpstream({
       url: upstreamUrl(base, ctx.request),
       request: ctx.request,
       timeoutMs: route.timeout_ms,
       signal: ctx.signal,
     });
+  };
 }
 
 export function buildRouteHandler(
   route: RouteConfig,
   deps: StageDeps,
+  health: TargetHealth,
 ): Handler {
   const stages = STAGES.map((create) => create(route, deps)).filter(
     (stage) => stage !== undefined,
   );
-  return compose(stages, createUpstreamHandler(route));
+  return compose(stages, createUpstreamHandler(route, health));
 }

@@ -17,6 +17,8 @@ const DEFAULT_GATEWAY_SECTION = `gateway:
 export interface TestGateway {
   /** Base URL, e.g. "http://127.0.0.1:54321". */
   url: string;
+  /** Close it before the test ends (it is closed automatically otherwise). */
+  close: () => Promise<void>;
 }
 
 export async function startGateway(
@@ -29,6 +31,11 @@ export async function startGateway(
     : `${DEFAULT_GATEWAY_SECTION}${configYaml}`;
   const server = createGateway(parseConfig(text), options);
   const url = await listen(server);
-  t.after(async () => closeServer(server));
-  return { url };
+  let closed: Promise<void> | undefined = undefined;
+  const close = async (): Promise<void> => {
+    closed ??= closeServer(server);
+    return closed;
+  };
+  t.after(close);
+  return { url, close };
 }
