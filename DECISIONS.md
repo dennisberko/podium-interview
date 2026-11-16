@@ -4,6 +4,11 @@
 - Route matching is longest match wins first, startup error on duplicate (route, method) combination in configuration
 - Middleware pipeline for config options to make it easy to add new features
 
+Rate limit
+- Full override of config
+- No way to opt out of global config e.g. `rate_limit: false`
+- It's per route defintion
+
 Open questions:
 - OPTIONS method?
 - health endpoint conflict - ignored today, should likely crash on startup
