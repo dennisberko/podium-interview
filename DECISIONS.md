@@ -13,6 +13,10 @@ Retry
 - Retry also includes connection errors
 - Will retry all methods inlcuding POST
 
+Load Balancing
+- Smooth weighted round robin
+- Reject startup config with round robin + weights
+
 Open questions:
 - OPTIONS method?
 - health endpoint conflict - ignored today, should likely crash on startup
