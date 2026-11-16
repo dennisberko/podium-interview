@@ -1,0 +1,1 @@
+- Load config on startup, sacrifice hot reloading for less implementation complexity
